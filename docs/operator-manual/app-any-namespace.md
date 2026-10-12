@@ -76,6 +76,49 @@ kubectl apply -k examples/k8s-rbac/argocd-server-applications/
 > [!NOTE]
 > At some later point in time, we may make this cluster role part of the default installation manifests.
 
+##### Application controller permissions in managed namespaces
+
+The `argocd-application-controller` must be able to watch `Application` objects in the additional namespaces, patch them to record status/conditions/finalizers, and create Kubernetes Events there.
+
+- With the default cluster-scoped install (the manifests shipped in this repository), the controller's `ClusterRole` already grants cluster-wide access, so no extra RBAC is required for the controller.
+- If you run a hardened install with a restricted controller `ClusterRole`, ensure the controller ServiceAccount has at least the following permissions in every namespace you enable via `--application-namespaces`:
+  - `argoproj.io` `applications`: `get`, `list`, `watch`, `patch`
+  - core `events`: `create`
+
+Example Role/RoleBinding to grant these permissions in a single managed namespace (repeat per namespace), binding to the controller ServiceAccount in the control-plane namespace (`argocd` by default):
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-application-controller-apps
+  namespace: some-namespace
+rules:
+- apiGroups: ["argoproj.io"]
+  resources: ["applications"]
+  verbs: ["get", "list", "watch", "patch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-application-controller-apps
+  namespace: some-namespace
+subjects:
+- kind: ServiceAccount
+  name: argocd-application-controller
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-application-controller-apps
+```
+
+> [!NOTE]
+> Instead of namespace-scoped `Role`/`RoleBinding`s, you may create a single `ClusterRole` with the same rules and bind it to the controller ServiceAccount using a `ClusterRoleBinding` to cover multiple namespaces at once.
+
 ### Allowing additional namespaces in an AppProject
 
 Any user with Kubernetes access to the Argo CD control plane's namespace (`argocd`), especially those with permissions to create or update `Applications` in a declarative way, is to be considered an Argo CD admin.
